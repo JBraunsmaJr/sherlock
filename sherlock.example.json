@@ -1,0 +1,59 @@
+{
+  "interface": "",
+  "listen": "127.0.0.1:7878",
+  "data_dir": "sherlock-data",
+  "open_browser": true,
+  "memory_limit_mb": 128,
+  "low_priority": true,
+  "retention_days": 14,
+  "sampling": {
+    "link_interval": "1s",
+    "ping_interval": "1s",
+    "ping_timeout": "900ms",
+    "dns_interval": "10s"
+  },
+  "targets": {
+    "gateway": "",
+    "internet": "1.1.1.1",
+    "dns_host": "example.com"
+  },
+  "events": {
+    "pre_window": "2m0s",
+    "post_window": "20s",
+    "cooldown": "1m0s",
+    "gateway_loss_consecutive": 3,
+    "gateway_latency_ms": 50,
+    "gateway_latency_consecutive": 3,
+    "internet_loss_consecutive": 5,
+    "interface_error_delta": 1,
+    "dns_failure": true,
+    "throughput_min_mbps": 0
+  },
+  "capture": {
+    "enabled": true,
+    "snaplen": 128,
+    "filter": "",
+    "segment": "15s",
+    "buffer_kb": 2048
+  },
+  "throughput": {
+    "mode": "off",
+    "iperf3_path": "iperf3",
+    "server": "",
+    "port": 5201,
+    "duration": "5s",
+    "interval": "30m0s",
+    "windows": null,
+    "skip_processes": [
+      "cs2.exe",
+      "dota2.exe",
+      "VALORANT-Win64-Shipping.exe",
+      "FortniteClient-Win64-Shipping.exe",
+      "r5apex.exe",
+      "League of Legends.exe",
+      "RocketLeague.exe",
+      "Overwatch.exe"
+    ],
+    "skip_above_mbps": 20
+  }
+}

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sherlock</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='13' cy='13' r='8' fill='none' stroke='%233FB6A8' stroke-width='3.5'/><path d='M19 19l8 8' stroke='%233FB6A8' stroke-width='4' stroke-linecap='round'/></svg>">
+<link rel="stylesheet" href="uPlot.min.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Sherlock</h1>
+    <span class="adapter" id="adapter">Connecting…</span>
+  </div>
+  <div class="vitals" id="vitals" aria-live="polite">
+    <div class="vital" id="v-link"><span class="vl">Link</span><span class="vv">–</span><span class="vs"></span></div>
+    <div class="vital" id="v-gateway"><span class="vl">Gateway</span><span class="vv">–</span><span class="vs"></span></div>
+    <div class="vital" id="v-internet"><span class="vl">Internet</span><span class="vv">–</span><span class="vs"></span></div>
+    <div class="vital" id="v-dns"><span class="vl">DNS</span><span class="vv">–</span><span class="vs"></span></div>
+    <div class="vital" id="v-traffic"><span class="vl">Traffic</span><span class="vv">–</span><span class="vs">last 10 s</span></div>
+  </div>
+</header>
+
+<div class="recording" id="recording" hidden>
+  <span class="pulse" aria-hidden="true"></span>
+  <span id="recording-text">Recording an event</span>
+</div>
+
+<div class="controls">
+  <div class="ranges" role="group" aria-label="Time range">
+    <button data-range="900000" class="on">15 min</button>
+    <button data-range="3600000">1 hour</button>
+    <button data-range="21600000">6 hours</button>
+    <button data-range="86400000">24 hours</button>
+    <button data-range="604800000">7 days</button>
+    <button id="unzoom" class="unzoom" hidden>Back to live</button>
+  </div>
+  <form class="note" id="note-form" autocomplete="off">
+    <label for="note-text" class="sr">Note</label>
+    <input id="note-text" maxlength="2000" placeholder="Note what you just did, like “raised the desk”">
+    <button type="submit">Add note</button>
+  </form>
+</div>
+
+<main class="layout">
+  <section class="charts" id="charts" aria-label="Timeline">
+    <p class="hint">Drag across any chart to zoom in. Red bands are events, yellow lines are notes.</p>
+  </section>
+
+  <aside class="side">
+    <section class="panel tools">
+      <div class="tool">
+        <div class="tool-head">
+          <h2>Packet capture</h2>
+          <button class="switch" id="capture-switch" role="switch" aria-checked="false" aria-label="Packet capture">
+            <span class="knob"></span>
+          </button>
+        </div>
+        <p class="tool-note" id="capture-note">–</p>
+      </div>
+      <div class="tool">
+        <div class="tool-head">
+          <h2>Speed test</h2>
+          <div class="seg" role="radiogroup" aria-label="Speed test mode" id="mode">
+            <button role="radio" data-mode="off" aria-checked="false">Off</button>
+            <button role="radio" data-mode="manual" aria-checked="false">Manual</button>
+            <button role="radio" data-mode="scheduled" aria-checked="false">Scheduled</button>
+          </div>
+        </div>
+        <p class="tool-note" id="tput-note">–</p>
+        <button class="run" id="run-test" disabled>Run speed test</button>
+      </div>
+    </section>
+
+    <section class="panel events" id="events-panel">
+      <h2>Events <span class="count" id="event-count"></span></h2>
+      <ol class="event-list" id="event-list"></ol>
+      <p class="empty" id="events-empty" hidden>No events in this range. When the link drops, slows down or loses packets, it appears here with a snapshot of what led up to it.</p>
+    </section>
+
+    <section class="panel detail" id="detail" hidden>
+      <button class="back" id="detail-back">All events</button>
+      <div id="detail-body"></div>
+    </section>
+  </aside>
+</main>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="uPlot.iife.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
