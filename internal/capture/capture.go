@@ -243,7 +243,7 @@ func (c *Capturer) openSegment(now time.Time) error {
 	c.buf = bufio.NewWriterSize(f, 64*1024)
 	c.w = pcapgo.NewWriter(c.buf)
 	c.segStart = now
-	return c.w.WriteFileHeader(uint32(c.opts.SnapLen), c.link)
+	return c.w.WriteFileHeader(segmentSnapLen, c.link)
 }
 
 func (c *Capturer) closeSegment() {
@@ -305,8 +305,11 @@ func moveFile(from, to string) error {
 }
 
 // Merge writes the packets from segment files whose timestamps fall within
-// [from, to] into a single pcap at out, then deletes the segments.
-// It returns how many packets were written.
+// [from, to] into a single pcap at out. It returns how many packets were written.
+//
+// A segment that can't be read is skipped rather than failing the whole
+// merge, and is left on disk so nothing is lost; the error says which ones.
+// Segments that merged cleanly are deleted.
 func Merge(segments []string, out string, from, to time.Time) (int, error) {
 	sort.Slice(segments, func(i, j int) bool { return segName(segments[i]) < segName(segments[j]) })
 	f, err := os.Create(out)
@@ -315,20 +318,28 @@ func Merge(segments []string, out string, from, to time.Time) (int, error) {
 	}
 	bw := bufio.NewWriterSize(f, 64*1024)
 	var w *pcapgo.Writer
+	ensureHeader := func(lt layers.LinkType) error {
+		if w != nil {
+			return nil
+		}
+		w = pcapgo.NewWriter(bw)
+		return w.WriteFileHeader(segmentSnapLen, lt)
+	}
+
 	count := 0
+	var failed, done []string
 	for _, seg := range segments {
-		n, err := appendSegment(seg, bw, &w, from, to)
+		n, err := mergeSegment(seg, ensureHeader, func() *pcapgo.Writer { return w }, from, to)
 		count += n
 		if err != nil {
-			bw.Flush()
-			f.Close()
-			return count, fmt.Errorf("%s: %w", filepath.Base(seg), err)
+			failed = append(failed, fmt.Sprintf("%s: %v", filepath.Base(seg), err))
+			continue
 		}
+		done = append(done, seg)
 	}
-	if w == nil {
-		// No readable segments: still produce a valid, empty capture.
-		w = pcapgo.NewWriter(bw)
-		w.WriteFileHeader(65535, layers.LinkTypeEthernet)
+	if err := ensureHeader(layers.LinkTypeEthernet); err != nil {
+		f.Close()
+		return count, err
 	}
 	if err := bw.Flush(); err != nil {
 		f.Close()
@@ -337,44 +348,50 @@ func Merge(segments []string, out string, from, to time.Time) (int, error) {
 	if err := f.Close(); err != nil {
 		return count, err
 	}
-	for _, seg := range segments {
+	for _, seg := range done {
 		os.Remove(seg)
+	}
+	if len(failed) > 0 {
+		return count, fmt.Errorf("%d of %d segments unreadable and kept: %s",
+			len(failed), len(segments), strings.Join(failed, "; "))
 	}
 	return count, nil
 }
 
-func appendSegment(seg string, bw *bufio.Writer, w **pcapgo.Writer, from, to time.Time) (int, error) {
-	sf, err := os.Open(seg)
+// mergeSegment copies one segment's in-range packets to the merged file,
+// writing the merged file's header first if this is the first segment read.
+func mergeSegment(seg string, ensureHeader func(layers.LinkType) error, writer func() *pcapgo.Writer, from, to time.Time) (int, error) {
+	f, err := os.Open(seg)
 	if err != nil {
 		return 0, err
 	}
-	defer sf.Close()
-	r, err := pcapgo.NewReader(bufio.NewReader(sf))
+	defer f.Close()
+	sr, err := newSegmentReader(f)
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return 0, nil // rotated before its header was flushed: empty, not broken
+	}
 	if err != nil {
-		// A segment can be empty if it was rotated before its header flushed.
-		return 0, nil
+		return 0, err
 	}
-	if *w == nil {
-		*w = pcapgo.NewWriter(bw)
-		if err := (*w).WriteFileHeader(r.Snaplen(), r.LinkType()); err != nil {
-			return 0, err
-		}
+	if err := ensureHeader(sr.linkType); err != nil {
+		return 0, err
 	}
+	w := writer()
 	n := 0
 	for {
-		data, ci, err := r.ReadPacketData()
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		p, err := sr.next()
+		if errors.Is(err, io.EOF) {
 			return n, nil
 		}
 		if err != nil {
 			return n, err
 		}
-		if ci.Timestamp.Before(from) || ci.Timestamp.After(to) {
+		if p.ts.Before(from) || p.ts.After(to) {
 			continue
 		}
-		if err := (*w).WritePacket(gopacket.CaptureInfo{
-			Timestamp: ci.Timestamp, CaptureLength: ci.CaptureLength, Length: ci.Length,
-		}, data); err != nil {
+		if err := w.WritePacket(gopacket.CaptureInfo{
+			Timestamp: p.ts, CaptureLength: len(p.data), Length: int(p.length),
+		}, p.data); err != nil {
 			return n, err
 		}
 		n++

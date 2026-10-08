@@ -14,6 +14,10 @@ import (
 )
 
 var (
+	kernel32                      = windows.NewLazySystemDLL("kernel32.dll")
+	procQueryPerformanceCounter   = kernel32.NewProc("QueryPerformanceCounter")
+	procQueryPerformanceFrequency = kernel32.NewProc("QueryPerformanceFrequency")
+
 	procIcmpCreateFile  = iphlpapi.NewProc("IcmpCreateFile")
 	procIcmpCloseHandle = iphlpapi.NewProc("IcmpCloseHandle")
 	procIcmpSendEcho    = iphlpapi.NewProc("IcmpSendEcho")
@@ -42,8 +46,13 @@ const (
 
 // icmpPinger uses the Windows ICMP helper API. Unlike raw sockets it doesn't
 // need administrator rights. IcmpSendEcho only reports whole milliseconds, so
-// the round trip is timed around the call instead, which gives sub-millisecond
-// resolution for LAN targets at the cost of a few microseconds of call overhead.
+// the round trip is timed around the call with QueryPerformanceCounter.
+//
+// Go's own clock (time.Now / time.Since) isn't usable for this on Windows: its
+// monotonic reading only advances on the system timer tick, typically every
+// 0.5 to 15.6 ms, so a 0.3 ms LAN ping measured as either 0 or one whole tick.
+// QPC resolves to well under a microsecond. The figure includes a few
+// microseconds of call overhead, which is negligible next to a real RTT.
 type icmpPinger struct {
 	handle  uintptr
 	dst     uint32
@@ -74,7 +83,7 @@ func (p *icmpPinger) Ping(timeout time.Duration) (time.Duration, error) {
 	if ms == 0 {
 		ms = 1
 	}
-	start := time.Now()
+	start := qpc()
 	n, _, callErr := procIcmpSendEcho.Call(
 		p.handle,
 		uintptr(p.dst),
@@ -85,7 +94,7 @@ func (p *icmpPinger) Ping(timeout time.Duration) (time.Duration, error) {
 		uintptr(len(p.reply)),
 		uintptr(ms),
 	)
-	rtt := time.Since(start)
+	rtt := qpcSince(start)
 	if n == 0 {
 		if errno, ok := callErr.(syscall.Errno); ok && errno == ipReqTimedOut {
 			return 0, ErrTimeout
@@ -107,3 +116,17 @@ func (p *icmpPinger) Close() error {
 	procIcmpCloseHandle.Call(p.handle)
 	return nil
 }
+
+var qpcFreq = func() int64 {
+	var f int64
+	procQueryPerformanceFrequency.Call(uintptr(unsafe.Pointer(&f)))
+	return f
+}()
+
+func qpc() int64 {
+	var c int64
+	procQueryPerformanceCounter.Call(uintptr(unsafe.Pointer(&c)))
+	return c
+}
+
+func qpcSince(start int64) time.Duration { return ticksToDuration(qpc()-start, qpcFreq) }

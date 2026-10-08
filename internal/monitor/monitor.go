@@ -112,6 +112,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 	}
 	run(m.flushLoop)
 	run(m.pruneLoop)
+	run(func(context.Context) { m.recorder.repairCaptures() })
 	run(m.tput.run)
 
 	<-ctx.Done()

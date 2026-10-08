@@ -89,3 +89,13 @@ func toIPv4(ip net.IP) (net.IP, error) {
 	}
 	return v4, nil
 }
+
+// ticksToDuration converts a high-resolution counter delta to a Duration.
+// Whole seconds and the remainder are scaled separately so large deltas
+// can't overflow int64.
+func ticksToDuration(ticks, freq int64) time.Duration {
+	if freq <= 0 || ticks < 0 {
+		return 0
+	}
+	return time.Duration(ticks/freq)*time.Second + time.Duration(ticks%freq)*time.Second/time.Duration(freq)
+}

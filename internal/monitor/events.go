@@ -267,6 +267,54 @@ func (r *Recorder) capture(a *activeEvent) {
 	m.logf("event %s closed: %d triggers, files in %s", a.id, len(triggers), a.dir)
 }
 
+// repairCaptures rebuilds capture.pcap for events whose merge failed and left
+// raw segments behind, as older versions did when the driver delivered packets
+// longer than the snaplen. It runs once at startup and is a no-op when there
+// is nothing to fix.
+func (r *Recorder) repairCaptures() {
+	dirs, _ := filepath.Glob(filepath.Join(r.m.EventsDir(), "*", "segments"))
+	for _, segDir := range dirs {
+		dir := filepath.Dir(segDir)
+		if dir == r.activeDir() {
+			continue
+		}
+		segs, _ := filepath.Glob(filepath.Join(segDir, "*.pcap"))
+		if len(segs) == 0 {
+			os.Remove(segDir)
+			continue
+		}
+		evPath := filepath.Join(dir, "event.json")
+		b, err := os.ReadFile(evPath)
+		if err != nil {
+			continue
+		}
+		var ev EventFile
+		if err := json.Unmarshal(b, &ev); err != nil || !ev.Complete {
+			continue
+		}
+		n, err := capture.Merge(segs, filepath.Join(dir, "capture.pcap"),
+			time.UnixMilli(ev.WindowStart), time.UnixMilli(ev.End))
+		ev.Capture = &EventCapture{File: "capture.pcap", Packets: n}
+		if err != nil {
+			ev.Capture.Error = err.Error()
+		}
+		os.Remove(segDir) // only succeeds once every segment merged
+		if out, err := json.MarshalIndent(ev, "", "  "); err == nil {
+			os.WriteFile(evPath, out, 0o644)
+		}
+		r.m.logf("event %s: rebuilt capture.pcap (%d packets)", ev.ID, n)
+	}
+}
+
+func (r *Recorder) activeDir() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active == nil {
+		return ""
+	}
+	return r.active.dir
+}
+
 func (r *Recorder) writeSamples(dir string, from, to int64) error {
 	links, err := r.m.store.RawLinks(from, to)
 	if err != nil {
