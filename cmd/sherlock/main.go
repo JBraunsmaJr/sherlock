@@ -37,6 +37,7 @@ Usage:
   sherlock [run]          start monitoring and serve the dashboard
   sherlock interfaces     list network adapters and their names
   sherlock note "text"    add a note to the timeline ("raised the desk")
+  sherlock pingtest [ip]  ping like the monitor does and print every result
   sherlock version
 
 Flags:
@@ -48,6 +49,13 @@ func main() {
 	cmd := "run"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]
+	}
+	if cmd == "pingtest" {
+		if err := pingtest(args); err != nil {
+			fmt.Fprintln(os.Stderr, "sherlock:", err)
+			os.Exit(1)
+		}
+		return
 	}
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }

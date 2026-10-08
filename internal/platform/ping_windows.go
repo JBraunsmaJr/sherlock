@@ -96,20 +96,74 @@ func (p *icmpPinger) Ping(timeout time.Duration) (time.Duration, error) {
 	)
 	rtt := qpcSince(start)
 	if n == 0 {
-		if errno, ok := callErr.(syscall.Errno); ok && errno == ipReqTimedOut {
+		errno, _ := callErr.(syscall.Errno)
+		if errno == ipReqTimedOut {
 			return 0, ErrTimeout
 		}
-		return 0, fmt.Errorf("IcmpSendEcho: %v", callErr)
+		return 0, fmt.Errorf("IcmpSendEcho returned no reply: %s (Windows code %d)", ipStatusText(uint32(errno), callErr), uint32(errno))
 	}
 	r := (*icmpEchoReply)(unsafe.Pointer(&p.reply[0]))
-	switch r.Status {
-	case ipSuccess:
-		return rtt, nil
-	case ipReqTimedOut:
+	switch {
+	case r.Status == ipReqTimedOut:
 		return 0, ErrTimeout
-	default:
-		return 0, fmt.Errorf("ICMP status %d", r.Status)
+	case r.Status != ipSuccess:
+		return 0, fmt.Errorf("%s (ICMP status %d) from %s", ipStatusText(r.Status, nil), r.Status, addrString(r.Address))
+	case r.Address != p.dst:
+		// An echo reply always comes from the host that was pinged. Anything
+		// else means the reply belongs to a different request, so don't count it.
+		return 0, fmt.Errorf("reply came from %s, not %s", addrString(r.Address), addrString(p.dst))
 	}
+	return rtt, nil
+}
+
+func addrString(a uint32) string {
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], a)
+	return net.IP(b[:]).String()
+}
+
+// ipStatusText names the IP_STATUS codes from ipexport.h that a ping can return.
+func ipStatusText(code uint32, fallback error) string {
+	switch code {
+	case 11001:
+		return "reply buffer too small"
+	case 11002:
+		return "destination network unreachable"
+	case 11003:
+		return "destination host unreachable"
+	case 11004:
+		return "destination protocol unreachable"
+	case 11005:
+		return "destination port unreachable"
+	case 11006:
+		return "no resources"
+	case 11007:
+		return "bad option"
+	case 11008:
+		return "hardware error"
+	case 11009:
+		return "packet too big"
+	case 11011:
+		return "bad request"
+	case 11012:
+		return "bad route"
+	case 11013:
+		return "TTL expired in transit"
+	case 11014:
+		return "TTL expired during reassembly"
+	case 11015:
+		return "parameter problem"
+	case 11016:
+		return "source quench"
+	case 11018:
+		return "bad destination"
+	case 11050:
+		return "general failure"
+	}
+	if fallback != nil {
+		return fallback.Error()
+	}
+	return "unknown status"
 }
 
 func (p *icmpPinger) Close() error {
